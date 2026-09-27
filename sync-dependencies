@@ -9,9 +9,10 @@
 # Each project's `scripts/dx` runs its commands through this, from the project's directory.
 #
 # A stamp in node_modules records the manifests of the last install, so an unchanged project
-# costs one hash. A lock beside it keeps parallel commands from installing into the shared volume
-# at once, and the check is repeated under the lock, so only the first of them installs. A failed
-# install writes no stamp, so the next command tries again.
+# costs one hash. A lock on node_modules itself, which an install may empty but never removes,
+# keeps parallel commands from installing into the shared volume at once, and the check is
+# repeated under the lock, so only the first of them installs. A failed install writes no stamp,
+# so the next command tries again.
 #
 # A project without pnpm-lock.yaml is left alone, and so is a pnpm command that changes the
 # dependencies itself, such as `pnpm install` or `pnpm add`: it installs anyway, and a frozen
@@ -28,14 +29,26 @@ set -e
 token=${SYNC_DEPENDENCIES_GITHUB_TOKEN:-}
 unset SYNC_DEPENDENCIES_GITHUB_TOKEN
 
+# Prints pnpm's command, the first argument that is neither an option nor an option's value.
+pnpm_command() {
+	shift
+	while [ $# -gt 0 ]; do
+		case $1 in
+			-C | --dir | -F | --filter | --filter-prod | --reporter | --loglevel | --workspace-concurrency)
+				[ $# -gt 1 ] && shift ;;
+			-*) ;;
+			*) printf '%s\n' "$1"; return ;;
+		esac
+		shift
+	done
+}
+
 sync=yes
 [ -f package.json ] && [ -f pnpm-lock.yaml ] || sync=no
 if [ "${1:-}" = pnpm ]; then
-	for argument in "$@"; do
-		case $argument in
-			install | i | add | update | up | upgrade | remove | rm | uninstall | un | dedupe | import | prune) sync=no ;;
-		esac
-	done
+	case $(pnpm_command "$@") in
+		install | i | add | update | up | upgrade | remove | rm | uninstall | un | dedupe | import | prune) sync=no ;;
+	esac
 fi
 
 if [ "$sync" = yes ]; then
@@ -48,7 +61,7 @@ if [ "$sync" = yes ]; then
 	stamp=node_modules/.sync-dependencies
 	if [ "$(cat "$stamp" 2>/dev/null)" != "$want" ]; then
 		mkdir -p node_modules
-		exec 9>node_modules/.sync-dependencies.lock
+		exec 9<node_modules
 		flock 9
 		if [ "$(cat "$stamp" 2>/dev/null)" != "$want" ]; then
 			echo "sync-dependencies: installing the changed dependencies into node_modules" >&2
