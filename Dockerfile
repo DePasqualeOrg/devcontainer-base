@@ -1,4 +1,7 @@
-FROM node:24
+# Pinned by digest, so the Node.js base changes only when this line does; move it to a newer node:24
+# release deliberately, reading the new digest from the registry. The apt packages and the npm
+# globals below still resolve at each build, the npm globals subject to the release cooldown.
+FROM node:24@sha256:64af3819f9275802414d7cdc38c27e9d82bd564dec4d4da87d008255d36c63b4
 
 ENV DEVCONTAINER=true
 ENV NODE_ENV=development
@@ -27,10 +30,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   ripgrep fd-find tree \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Set up npm global directory with proper permissions and config
+# Set up the npm global directory, and npm's supply-chain policy, which matches the host's: no
+# version published less than 3 days ago, and no package install scripts.
 RUN mkdir -p ${NPM_GLOBAL_DIR} && \
   chown -R node:node /usr/local/share && \
-  echo "prefix=${NPM_GLOBAL_DIR}" > /home/node/.npmrc
+  printf 'prefix=%s\nmin-release-age=3\nignore-scripts=true\n' "${NPM_GLOBAL_DIR}" > /home/node/.npmrc
 
 # Create workspace and config directories
 RUN mkdir -p /workspace ${CLAUDE_CONFIG_DIR} ${GEMINI_CONFIG_DIR} ${CODEX_CONFIG_DIR} && \
@@ -50,9 +54,9 @@ RUN chown node:node /home/node/.bashrc_custom
 # Source custom bash configuration
 RUN echo 'source ~/.bashrc_custom' >> /home/node/.bashrc
 
-# Add the npm global dir and the user-local bin to PATH. The Claude CLI installs to
-# /home/node/.local/bin; including it here makes `claude` resolve in non-login shells
-# too (e.g. `scripts/dx <cmd>`, which execs directly rather than via a login shell).
+# Add the npm global dir, where the agent CLIs install, and the user-local bin to PATH, so they
+# resolve in non-login shells too (e.g. `scripts/dx <cmd>`, which execs directly rather than via
+# a login shell).
 ENV PATH="${NPM_GLOBAL_DIR}/bin:/home/node/.local/bin:$PATH"
 
 # Enable Corepack so the pnpm/yarn shims exist for every project, and never prompt to
@@ -66,20 +70,23 @@ RUN corepack enable
 # see the script. Projects on other bases copy it from this image (`COPY --from`).
 COPY --chmod=755 sync-dependencies /usr/local/bin/sync-dependencies
 
-# Install Claude Code, Gemini, Codex, and npm-check-updates as node user. Scrub the
-# Claude CLI's first-run state (an anonymous machineID/userID + backups it writes on
-# install) in the same layer, so the published base carries no per-machine identifiers;
-# each container regenerates them at runtime.
+# Install Claude Code, Gemini, Codex, and npm-check-updates as the node user, through npm, so the
+# release cooldown above applies to every one of them. Claude Code's binary arrives as its platform
+# package; its own install script, the one script run here, only links that binary into place.
+# Its auto-updater is off: it reinstalls through npm, where scripts are disabled, so an update would
+# leave the unlinked stub in place of the binary. A new version arrives with the next image.
+ENV DISABLE_AUTOUPDATER=1
 USER node
-RUN curl -fsSL https://claude.ai/install.sh | bash \
-  && rm -rf /home/node/.claude/.claude.json /home/node/.claude/backups /home/node/.claude/downloads
-RUN npm install -g @google/gemini-cli @openai/codex npm-check-updates && npm cache clean --force
+RUN npm install -g @anthropic-ai/claude-code @google/gemini-cli @openai/codex npm-check-updates \
+  && node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs" \
+  && claude --version \
+  && npm cache clean --force
 
 # Enforce the supply-chain "minimum release age" policy for pnpm in every container:
-# don't resolve npm versions published less than 7 days ago (10080 minutes), matching the
-# host policy. pnpm 11 reads this only from pnpm-workspace.yaml or the global pnpm config
+# don't resolve npm versions published less than 3 days ago (4320 minutes), matching the
+# host and the projects. pnpm 11 reads this only from pnpm-workspace.yaml or the global pnpm config
 # (config.yaml) — NOT from .npmrc — so write it to the node user's global pnpm config.
 RUN mkdir -p /home/node/.config/pnpm \
-  && printf 'minimumReleaseAge: 10080\n' > /home/node/.config/pnpm/config.yaml
+  && printf 'minimumReleaseAge: 4320\n' > /home/node/.config/pnpm/config.yaml
 
 WORKDIR /workspace

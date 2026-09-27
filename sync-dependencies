@@ -18,16 +18,8 @@
 # dependencies itself, such as `pnpm install` or `pnpm add`: it installs anyway, and a frozen
 # install ahead of it would fail on the very lockfile it is about to update.
 #
-# A caller that has a GitHub token for private dependencies but must not hand it to the command
-# passes it as SYNC_DEPENDENCIES_GITHUB_TOKEN. The install sees it as GITHUB_TOKEN, which the
-# image's git credential helper reads, and runs no package scripts; the variable is removed
-# before the command runs.
-#
 # Usage: sync-dependencies [command [argument...]]
 set -e
-
-token=${SYNC_DEPENDENCIES_GITHUB_TOKEN:-}
-unset SYNC_DEPENDENCIES_GITHUB_TOKEN
 
 # Prints pnpm's command, the first argument that is neither an option nor an option's value.
 pnpm_command() {
@@ -65,11 +57,7 @@ if [ "$sync" = yes ]; then
 		flock 9
 		if [ "$(cat "$stamp" 2>/dev/null)" != "$want" ]; then
 			echo "sync-dependencies: installing the changed dependencies into node_modules" >&2
-			if [ -n "$token" ]; then
-				GITHUB_TOKEN=$token pnpm install --frozen-lockfile --ignore-scripts --config.confirm-modules-purge=false >&2
-			else
-				pnpm install --frozen-lockfile --ignore-scripts --config.confirm-modules-purge=false >&2
-			fi
+			pnpm install --frozen-lockfile --ignore-scripts --config.confirm-modules-purge=false >&2
 			printf '%s\n' "$want" > "$stamp"
 		fi
 		exec 9>&-
