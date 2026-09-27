@@ -56,11 +56,15 @@ RUN echo 'source ~/.bashrc_custom' >> /home/node/.bashrc
 ENV PATH="${NPM_GLOBAL_DIR}/bin:/home/node/.local/bin:$PATH"
 
 # Enable Corepack so the pnpm/yarn shims exist for every project, and never prompt to
-# download a package manager at runtime. Each project pre-fetches its own pinned version
-# in its Dockerfile (`corepack prepare pnpm@<version> --activate`), so throwaway dev
-# containers don't depend on the network/DNS to provision pnpm on first use.
+# download a package manager at runtime. Each project fetches the version its package.json
+# pins while its image builds (`RUN pnpm --version`), so throwaway dev containers don't
+# depend on the network/DNS to provision pnpm on first use.
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable
+
+# Brings a project's node_modules volume up to date with its manifests before each command;
+# see the script. Projects on other bases copy it from this image (`COPY --from`).
+COPY --chmod=755 sync-dependencies /usr/local/bin/sync-dependencies
 
 # Install Claude Code, Gemini, Codex, and npm-check-updates as node user. Scrub the
 # Claude CLI's first-run state (an anonymous machineID/userID + backups it writes on

@@ -1,0 +1,39 @@
+#!/bin/sh
+# Installs the project's dependencies into node_modules when package.json, pnpm-lock.yaml or
+# pnpm-workspace.yaml has changed since the last install there, then runs the given command.
+#
+# Dev containers keep node_modules in a named volume, off the host. Docker fills such a volume
+# from the image only when it creates the volume, so a rebuilt image never reaches an existing
+# one, and a dependency change would otherwise leave every later container on the old packages.
+# Each project's `scripts/dx` runs its commands through this, from the project's directory.
+#
+# A stamp in node_modules records the manifests of the last install, so an unchanged project
+# costs one hash. A lock beside it keeps parallel commands from installing into the shared volume
+# at once, and the check is repeated under the lock, so only the first of them installs. A failed
+# install writes no stamp, so the next command tries again.
+#
+# Usage: sync-dependencies [command [argument...]]
+set -e
+
+if [ -f package.json ]; then
+	manifests=package.json
+	for file in pnpm-lock.yaml pnpm-workspace.yaml; do
+		if [ -f "$file" ]; then manifests="$manifests $file"; fi
+	done
+	# The names are fixed and contain no spaces, so the list splits safely.
+	want=$(cat $manifests | sha256sum)
+	stamp=node_modules/.sync-dependencies
+	if [ "$(cat "$stamp" 2>/dev/null)" != "$want" ]; then
+		mkdir -p node_modules
+		exec 9>node_modules/.sync-dependencies.lock
+		flock 9
+		if [ "$(cat "$stamp" 2>/dev/null)" != "$want" ]; then
+			echo "sync-dependencies: installing the changed dependencies into node_modules" >&2
+			pnpm install --frozen-lockfile --ignore-scripts >&2
+			printf '%s\n' "$want" > "$stamp"
+		fi
+		exec 9>&-
+	fi
+fi
+
+if [ $# -gt 0 ]; then exec "$@"; fi
