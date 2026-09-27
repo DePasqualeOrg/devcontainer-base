@@ -6,19 +6,12 @@ FROM node:24@sha256:64af3819f9275802414d7cdc38c27e9d82bd564dec4d4da87d008255d36c
 ENV DEVCONTAINER=true
 ENV NODE_ENV=development
 
-ARG CLAUDE_CONFIG_DIR=/home/node/.claude
-ENV CLAUDE_CONFIG_DIR=$CLAUDE_CONFIG_DIR
-
-ARG GEMINI_CONFIG_DIR=/home/node/.gemini
-
-ARG CODEX_CONFIG_DIR=/home/node/.codex
-
 ARG NPM_GLOBAL_DIR=/usr/local/share/npm-global
 
 # Label for cleanup identification
 LABEL image-name="devcontainer-base"
 
-# Install additional tools needed for Claude Code (most basics already included)
+# Command-line tools for working in the container (the node image has the basics)
 RUN apt-get update && apt-get install -y --no-install-recommends \
   # Core tools
   git sudo procps dnsutils \
@@ -36,9 +29,8 @@ RUN mkdir -p ${NPM_GLOBAL_DIR} && \
   chown -R node:node /usr/local/share && \
   printf 'prefix=%s\nmin-release-age=3\nignore-scripts=true\n' "${NPM_GLOBAL_DIR}" > /home/node/.npmrc
 
-# Create workspace and config directories
-RUN mkdir -p /workspace ${CLAUDE_CONFIG_DIR} ${GEMINI_CONFIG_DIR} ${CODEX_CONFIG_DIR} && \
-  chown -R node:node /workspace ${CLAUDE_CONFIG_DIR} ${GEMINI_CONFIG_DIR} ${CODEX_CONFIG_DIR}
+# Create the workspace directory
+RUN mkdir -p /workspace && chown -R node:node /workspace
 
 # Set up bash history persistence
 RUN mkdir -p /commandhistory && \
@@ -54,7 +46,7 @@ RUN chown node:node /home/node/.bashrc_custom
 # Source custom bash configuration
 RUN echo 'source ~/.bashrc_custom' >> /home/node/.bashrc
 
-# Add the npm global dir, where the agent CLIs install, and the user-local bin to PATH, so they
+# Add the npm global dir, where npm-check-updates installs, and the user-local bin to PATH, so they
 # resolve in non-login shells too (e.g. `scripts/dx <cmd>`, which execs directly rather than via
 # a login shell).
 ENV PATH="${NPM_GLOBAL_DIR}/bin:/home/node/.local/bin:$PATH"
@@ -70,16 +62,11 @@ RUN corepack enable
 # see the script. Projects on other bases copy it from this image (`COPY --from`).
 COPY --chmod=755 sync-dependencies /usr/local/bin/sync-dependencies
 
-# Install Claude Code, Gemini, Codex, and npm-check-updates as the node user, through npm, so the
-# release cooldown above applies to every one of them. Claude Code's binary arrives as its platform
-# package; its own install script, the one script run here, only links that binary into place.
-# Its auto-updater is off: it reinstalls through npm, where scripts are disabled, so an update would
-# leave the unlinked stub in place of the binary. A new version arrives with the next image.
-ENV DISABLE_AUTOUPDATER=1
+# Install npm-check-updates, which the projects' dependency update scripts run, as the node user,
+# through npm, so the release cooldown above applies. Coding agents run on the host, not in here.
 USER node
-RUN npm install -g @anthropic-ai/claude-code @google/gemini-cli @openai/codex npm-check-updates \
-  && node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs" \
-  && claude --version \
+RUN npm install -g npm-check-updates \
+  && ncu --version \
   && npm cache clean --force
 
 # Enforce the supply-chain "minimum release age" policy for pnpm in every container:
