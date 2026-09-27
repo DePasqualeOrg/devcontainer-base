@@ -1,6 +1,7 @@
 #!/bin/sh
-# Installs the project's dependencies into node_modules when package.json, pnpm-lock.yaml or
-# pnpm-workspace.yaml has changed since the last install there, then runs the given command.
+# Installs the project's dependencies into node_modules when package.json, pnpm-lock.yaml,
+# pnpm-workspace.yaml or .npmrc has changed since the last install there, then runs the given
+# command.
 #
 # Dev containers keep node_modules in a named volume, off the host. Docker fills such a volume
 # from the image only when it creates the volume, so a rebuilt image never reaches an existing
@@ -12,12 +13,34 @@
 # at once, and the check is repeated under the lock, so only the first of them installs. A failed
 # install writes no stamp, so the next command tries again.
 #
+# A project without pnpm-lock.yaml is left alone, and so is a pnpm command that changes the
+# dependencies itself, such as `pnpm install` or `pnpm add`: it installs anyway, and a frozen
+# install ahead of it would fail on the very lockfile it is about to update.
+#
+# A caller that has a GitHub token for private dependencies but must not hand it to the command
+# passes it as SYNC_DEPENDENCIES_GITHUB_TOKEN. The install sees it as GITHUB_TOKEN, which the
+# image's git credential helper reads, and runs no package scripts; the variable is removed
+# before the command runs.
+#
 # Usage: sync-dependencies [command [argument...]]
 set -e
 
-if [ -f package.json ]; then
-	manifests=package.json
-	for file in pnpm-lock.yaml pnpm-workspace.yaml; do
+token=${SYNC_DEPENDENCIES_GITHUB_TOKEN:-}
+unset SYNC_DEPENDENCIES_GITHUB_TOKEN
+
+sync=yes
+[ -f package.json ] && [ -f pnpm-lock.yaml ] || sync=no
+if [ "${1:-}" = pnpm ]; then
+	for argument in "$@"; do
+		case $argument in
+			install | i | add | update | up | upgrade | remove | rm | uninstall | un | dedupe | import | prune) sync=no ;;
+		esac
+	done
+fi
+
+if [ "$sync" = yes ]; then
+	manifests="package.json pnpm-lock.yaml"
+	for file in pnpm-workspace.yaml .npmrc; do
 		if [ -f "$file" ]; then manifests="$manifests $file"; fi
 	done
 	# The names are fixed and contain no spaces, so the list splits safely.
@@ -29,7 +52,11 @@ if [ -f package.json ]; then
 		flock 9
 		if [ "$(cat "$stamp" 2>/dev/null)" != "$want" ]; then
 			echo "sync-dependencies: installing the changed dependencies into node_modules" >&2
-			pnpm install --frozen-lockfile --ignore-scripts >&2
+			if [ -n "$token" ]; then
+				GITHUB_TOKEN=$token pnpm install --frozen-lockfile --ignore-scripts --config.confirm-modules-purge=false >&2
+			else
+				pnpm install --frozen-lockfile --ignore-scripts --config.confirm-modules-purge=false >&2
+			fi
 			printf '%s\n' "$want" > "$stamp"
 		fi
 		exec 9>&-
