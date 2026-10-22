@@ -1,7 +1,7 @@
 # Pinned by digest, so the Node.js base changes only when this line does; move it to a newer node:24
 # release deliberately, reading the new digest from the registry. The apt packages and the npm
 # globals below still resolve at each build, the npm globals subject to the release cooldown.
-FROM node:24@sha256:64af3819f9275802414d7cdc38c27e9d82bd564dec4d4da87d008255d36c63b4
+FROM node:24.22.1@sha256:6449e19d8184d84062525b6a7524def03146c2cb04a7f08b076680d0e8e4240a
 
 ENV DEVCONTAINER=true
 ENV NODE_ENV=development
