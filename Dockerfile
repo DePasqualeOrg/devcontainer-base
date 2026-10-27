@@ -25,6 +25,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Use the distribution's maintained roots, with the current incident guard applied before npm.
 COPY configure-platform-trust.py /usr/local/lib/configure-platform-trust.py
+# Hosted builders and non-Debian consumers acquire this reviewed helper by pinned content hash.
+COPY scoped-system-trust.mjs /usr/local/lib/scoped-system-trust.mjs
 RUN python3 /usr/local/lib/configure-platform-trust.py
 ENV NODE_OPTIONS=--use-openssl-ca \
     SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
