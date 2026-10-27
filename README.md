@@ -1,0 +1,9 @@
+# Development container base
+
+Builds and release publication run on the Mini through `build.sh`, under the shared watchdog. There is no GitHub-hosted build workflow. A local build loads the named ARM64 image; `--publish` is an explicit release action that requires a clean, reviewed revision and registry authentication, builds ARM64 and AMD64 through the Mini's existing builder, and publishes the exact tag plus `latest`. Consumers pin the published digest rather than following `latest`. The script never prunes images or unrelated caches.
+
+Public Node TLS uses OpenSSL's distribution trust bundle, not Node's independently bundled roots. The image installs the CA package, applies `configure-platform-trust.py` before dependency downloads, and uses Debian’s own CA configuration to rebuild both the bundle and hashed directory so an alternate lookup cannot restore an excluded root. The helper is a temporary, exact-identity guard for incident149555, not a replacement public root program. Remove that guard only after the minimum supported distro bundle independently excludes the affected roots. Rebuild images when the distro trust package changes; a Mac host update does not update a container.
+
+Preserve `--use-openssl-ca` whenever a project adds options to `NODE_OPTIONS`. Keep private service CAs scoped to that service's verified client. Do not union an old public bundle back into platform trust or disable certificate/hostname verification.
+
+Verify a locally built image on the Mini with `docker run --rm --network none -v "$PWD:/verification:ro" devcontainer-base:<tag> python3 -m unittest discover -s /verification -p "test_*.py" -v` and the same command ending in `node /verification/verify-node-trust.mjs`. The Node check verifies the default exclusive CA selection and incident identities, then exercises acceptance and rejection with generated local certificates; it contacts no external service and cleans up its listeners and files.

@@ -14,7 +14,7 @@ LABEL image-name="devcontainer-base"
 # Command-line tools for working in the container (the node image has the basics)
 RUN apt-get update && apt-get install -y --no-install-recommends \
   # Core tools
-  git sudo procps dnsutils \
+  git sudo procps dnsutils ca-certificates python3 \
   # Shell tools
   fzf less man-db lsof bash-completion \
   # Utilities
@@ -22,6 +22,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   # Search and file tools
   ripgrep fd-find tree \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Use the distribution's maintained roots, with the current incident guard applied before npm.
+COPY configure-platform-trust.py /usr/local/lib/configure-platform-trust.py
+RUN python3 /usr/local/lib/configure-platform-trust.py
+ENV NODE_OPTIONS=--use-openssl-ca \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    SSL_CERT_DIR=/etc/ssl/certs
 
 # Set up the npm global directory, and npm's supply-chain policy, which matches the host's: no
 # version published less than 3 days ago, and no package install scripts.
